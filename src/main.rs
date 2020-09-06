@@ -37,17 +37,19 @@ async fn proxy(
     }
 
     let uri = format!("http://{}/.well-known/acme-challenge/{}", host, token);
+    info!("Forwarding challenge to '{}'.", uri);
 
     let mut proxied_response = match {
-            let req = client.get(uri)
-                .header(header::USER_AGENT, "JoelLinn/acme-proxy");
-            match c.timeout {
-                Some(d) => req.timeout(d),
-                _ => req,
+            let mut request = client.get(uri);
+            if c.timeout.is_some() {
+                request = request.timeout(c.timeout.unwrap())
             }
+            request
+                .header(header::USER_AGENT, "JoelLinn/acme-proxy")
+                .send()
+                .await
         }
-        .send()
-        .await {
+        {
             Ok(r) => r,
             Err(e) => return Err(error::ErrorBadGateway(e)),
         };
@@ -58,11 +60,11 @@ async fn proxy(
         s => return Err(error::ErrorBadGateway(format!("Server responded with status code {}.", s))),
     };
 
-    let auth_key = std::str::from_utf8(&proxied_response.body().await?)?.to_owned();
-    info!(target: "acme_proxy", "Got auth key '{}' for token '{}' on host '{}'.", auth_key, token, host);
+    let auth_key = std::str::from_utf8(&proxied_response.body().await?)?.trim().to_owned();
+    info!("Got auth key '{}' for token '{}' on host '{}'.", auth_key, token, host);
 
     // check if the authorization is valid
-    let re_auth = Regex::new(&format!(r"{}\.{}", token, "[A-Za-z0-9_-]{43,100}")).unwrap();
+    let re_auth = Regex::new(&format!(r"^{}\.{}", token, "[A-Za-z0-9_-]{43,100}$")).unwrap();
     if !re_auth.is_match(&auth_key) {
         return Err(error::ErrorBadGateway("Server responded with invalid key authorization."))
     }
@@ -76,8 +78,15 @@ async fn proxy(
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "acme_proxy=info,actix_web=debug");
-    env_logger::init();
+    {
+        let mut builder = env_logger::builder();
+        match std::env::var_os("RUST_LOG") {
+            Some(_) => &mut builder,
+            None => builder
+                .filter_level(log::LevelFilter::Info)
+                .filter(Some("actix_web"), log::LevelFilter::Debug)
+        }.init();
+    }
 
     let matches = clap::App::new("ACME Proxy")
         .version(clap::crate_version!())
@@ -100,7 +109,7 @@ async fn main() -> std::io::Result<()> {
         )
         .get_matches();
 
-    info!(target: "acme_proxy", "ACME Proxy started.");
+    info!("ACME Proxy {}", clap::crate_version!());
 
     HttpServer::new(move || {
         App::new()
@@ -117,8 +126,7 @@ async fn main() -> std::io::Result<()> {
                 "/.well-known/acme-challenge/{token:[A-Za-z0-9_-]{22,}}",
                 web::get().to(proxy))
             .default_service(
-                web::route()
-                    .to(|| HttpResponse::BadRequest()),
+                web::route().to(|| HttpResponse::BadRequest()),
             )
     })
     .workers(1)
