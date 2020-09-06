@@ -60,7 +60,7 @@ async fn proxy(
         s => return Err(error::ErrorBadGateway(format!("Server responded with status code {}.", s))),
     };
 
-    let auth_key = std::str::from_utf8(&proxied_response.body().await?)?.trim().to_owned();
+    let mut auth_key = std::str::from_utf8(&proxied_response.body().await?)?.trim().to_owned();
     info!("Got auth key '{}' for token '{}' on host '{}'.", auth_key, token, host);
 
     // check if the authorization is valid
@@ -69,6 +69,7 @@ async fn proxy(
         return Err(error::ErrorBadGateway("Server responded with invalid key authorization."))
     }
 
+    auth_key.push('\n');
     Ok(HttpResponse::Ok()
         .set_header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .set_header(header::SERVER, "JoelLinn/acme-proxy")
