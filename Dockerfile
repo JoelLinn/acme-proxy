@@ -1,16 +1,14 @@
-FROM rust as bob
+FROM ekidd/rust-musl-builder:latest as bob
 
-WORKDIR /usr/src/acme-proxy
-COPY ./src ./src
-COPY ./Cargo.toml .
+ADD --chown=rust:rust . .
 
 RUN rustc -V
 RUN cargo install --path .
 
 
-FROM debian:buster-slim
+FROM alpine:latest
 
-COPY --from=bob /usr/local/cargo/bin/acme-proxy /usr/local/bin/acme-proxy
+COPY --from=bob /home/rust/.cargo/bin/acme-proxy /usr/local/bin/
 
 EXPOSE 8080
 USER nobody
