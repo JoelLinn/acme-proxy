@@ -1,0 +1,23 @@
+version: '3.7'
+services:
+  acme-proxy:
+    image: joellinn/acme-proxy
+    restart: always
+    environment:
+      ACME_DOMAINS: '(\.i\.example\.com)$$'
+    networks:
+      - acme-proxy
+  haproxy:
+    build:
+      context: .
+    restart: always
+    depends_on:
+      - acme-proxy
+    networks:
+      - acme-proxy
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+
+networks:
+  acme-proxy:
