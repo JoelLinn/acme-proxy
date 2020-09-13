@@ -5,7 +5,10 @@ use actix_web::{web, Error, error, client::Client, Result, http::StatusCode, App
 use regex::Regex;
 
 struct ProxyConf {
+    // static stuff initialized once:
     pub re_valid_host: Regex,
+    pub re_valid_base64url: Regex,
+    // actual config:
     pub re_legal_host: Regex,
     pub timeout: core::time::Duration,
 }
@@ -13,7 +16,7 @@ struct ProxyConf {
 async fn proxy(
     req: HttpRequest,
     client: web::Data<Client>,
-    c: web::Data<std::sync::Arc<ProxyConf>>,
+    c: web::Data<ProxyConf>,
 ) -> Result<HttpResponse, Error> {
     let token = match req.match_info().get("token") {
         Some(t) => t,
@@ -57,15 +60,24 @@ async fn proxy(
         s => return Err(error::ErrorBadGateway(format!("Server responded with status code {}.", s))),
     };
 
-    let mut auth_key = std::str::from_utf8(&proxied_response.body().await?)?.trim().to_owned();
+    let mut auth_key = match std::str::from_utf8(&proxied_response.body().await?) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("Could not convert server response to utf8: {}", e);
+            return Err(error::ErrorBadGateway("Could not convert server response to utf8."))
+        }
+    }.trim().to_owned();
     info!("Got auth key '{}' for token '{}' on host '{}'.", auth_key, token, host);
 
     // check if the authorization is valid
-    let re_auth = match Regex::new(&format!(r"^{}\.{}", token, "[A-Za-z0-9_-]{43,100}$")) {
-        Ok(r) => r,
-        Err(_) => return Err(error::ErrorInternalServerError("Failed to verify key authorization."))
-    };
-    if !re_auth.is_match(&auth_key) {
+    let auth_len = auth_key.len() - (token.len() + 1);
+    if (auth_len < 43) || (auth_len > 100) ||
+        !auth_key.starts_with(token) ||
+        (auth_key.as_bytes()[token.len()] != b'.') ||
+        match auth_key.get((token.len() + 1)..) {
+            Some(s) => !c.re_valid_base64url.is_match(s),
+            None => true,
+        } {
         return Err(error::ErrorBadGateway("Server responded with invalid key authorization."))
     }
 
@@ -136,11 +148,11 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-
-    let proxy_conf = std::sync::Arc::new( ProxyConf {
+    let proxy_conf = web::Data::new( ProxyConf {
         re_valid_host: Regex::new(r"^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$").unwrap(),
+        re_valid_base64url: Regex::new(r"^[A-Za-z0-9_-]*$").unwrap(),
         re_legal_host: conf_re_legal_hosts,
-        timeout: conf_timeout
+        timeout: conf_timeout,
     });
 
     info!("ACME Proxy {}", clap::crate_version!());
@@ -148,7 +160,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .data(Client::new())
-            .data(proxy_conf.clone())
+            .app_data(proxy_conf.clone())
             .wrap(actix_web::middleware::Logger::default())
             .route(
                 "/.well-known/acme-challenge/{token:[A-Za-z0-9_-]{22,}}",
