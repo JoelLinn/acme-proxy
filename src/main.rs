@@ -5,15 +5,15 @@ use actix_web::{web, Error, error, client::Client, Result, http::StatusCode, App
 use regex::Regex;
 
 struct ProxyConf {
-    re_valid_host: Regex,
-    re_legal_host: Regex,
-    timeout: Option<core::time::Duration>,
+    pub re_valid_host: Regex,
+    pub re_legal_host: Regex,
+    pub timeout: core::time::Duration,
 }
 
 async fn proxy(
     req: HttpRequest,
     client: web::Data<Client>,
-    c: web::Data<ProxyConf>,
+    c: web::Data<std::sync::Arc<ProxyConf>>,
 ) -> Result<HttpResponse, Error> {
     let token = match req.match_info().get("token") {
         Some(t) => t,
@@ -40,11 +40,8 @@ async fn proxy(
     info!("Forwarding challenge to '{}'.", uri);
 
     let mut proxied_response = match {
-            let mut request = client.get(uri);
-            if c.timeout.is_some() {
-                request = request.timeout(c.timeout.unwrap())
-            }
-            request
+            client.get(uri)
+                .timeout(c.timeout)
                 .header(header::USER_AGENT, "JoelLinn/acme-proxy")
                 .send()
                 .await
@@ -64,7 +61,10 @@ async fn proxy(
     info!("Got auth key '{}' for token '{}' on host '{}'.", auth_key, token, host);
 
     // check if the authorization is valid
-    let re_auth = Regex::new(&format!(r"^{}\.{}", token, "[A-Za-z0-9_-]{43,100}$")).unwrap();
+    let re_auth = match Regex::new(&format!(r"^{}\.{}", token, "[A-Za-z0-9_-]{43,100}$")) {
+        Ok(r) => r,
+        Err(_) => return Err(error::ErrorInternalServerError("Failed to verify key authorization."))
+    };
     if !re_auth.is_match(&auth_key) {
         return Err(error::ErrorBadGateway("Server responded with invalid key authorization."))
     }
@@ -105,23 +105,50 @@ async fn main() -> std::io::Result<()> {
                 .takes_value(true)
                 .long("timeout")
                 .value_name("TIMEOUT")
+                .default_value("1000")
                 .help("Timeout for proxied request in milliseconds.")
                 .required(false),
         )
         .get_matches();
+
+    let conf_re_legal_hosts = {
+        let opt = matches.value_of("legal_hosts");
+        let r = match opt {
+            Some(s) => s,
+            None => return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Invalid legal_hosts value."))
+        };
+        match Regex::new(r) {
+            Ok(r) => r,
+            Err(e) => return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e))
+        }
+    };
+    let conf_timeout = {
+        let opt = matches.value_of("timeout");
+        match opt.and_then(|t| t.parse::<u64>().ok()) {
+            Some(t) => core::time::Duration::from_millis(t),
+            None=> return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Invalid timeout value '{}'.", opt.unwrap_or(""))))
+        }
+    };
+
+
+    let proxy_conf = std::sync::Arc::new( ProxyConf {
+        re_valid_host: Regex::new(r"^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$").unwrap(),
+        re_legal_host: conf_re_legal_hosts,
+        timeout: conf_timeout
+    });
 
     info!("ACME Proxy {}", clap::crate_version!());
 
     HttpServer::new(move || {
         App::new()
             .data(Client::new())
-            .data(ProxyConf {
-                re_valid_host: Regex::new(r"^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$").unwrap(),
-                re_legal_host: Regex::new(matches.value_of("legal_hosts").unwrap()).unwrap(),
-                timeout: matches.value_of("timeout")
-                    .and_then(|t| Some(t.parse::<u64>().unwrap()))
-                    .and_then(|t| Some(core::time::Duration::from_millis(t)))
-            })
+            .data(proxy_conf.clone())
             .wrap(actix_web::middleware::Logger::default())
             .route(
                 "/.well-known/acme-challenge/{token:[A-Za-z0-9_-]{22,}}",
