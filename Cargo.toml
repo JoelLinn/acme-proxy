@@ -1,6 +1,6 @@
 [package]
 name = "acme-proxy"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Joel Linn <jl@conductive.de>"]
 edition = '2018'
 
