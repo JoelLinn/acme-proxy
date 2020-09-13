@@ -1,7 +1,11 @@
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
-use actix_http::http::{header};
-use actix_web::{web, Error, error, client::Client, Result, http::StatusCode, App, HttpRequest, HttpResponse, HttpServer};
+use actix_http::http::header;
+use actix_web::{
+    client::Client, error, http::StatusCode, web, App, Error, HttpRequest, HttpResponse,
+    HttpServer, Result,
+};
 use regex::Regex;
 
 struct ProxyConf {
@@ -23,70 +27,93 @@ async fn proxy(
         None => return Err(error::ErrorNotExtended("Token undefined.")),
     };
 
-    let host = match req.headers()
+    let host = match req
+        .headers()
         .get(header::HOST)
-        .and_then(|host_value| host_value.to_str().ok()) {
-            Some(s) => s,
-            None => return Err(error::ErrorBadRequest("Empty host.")),
-        };
+        .and_then(|host_value| host_value.to_str().ok())
+    {
+        Some(s) => s,
+        None => return Err(error::ErrorBadRequest("Empty host.")),
+    };
 
     if host == "localhost" || !c.re_valid_host.is_match(host) {
-        return Err(error::ErrorBadRequest(format!("Invalid host name: '{}'", host)))
+        return Err(error::ErrorBadRequest(format!(
+            "Invalid host name: '{}'",
+            host
+        )));
     }
 
     // user filter for legal subdomains or list of hosts
     if !c.re_legal_host.is_match(host) {
-        return Err(error::ErrorForbidden(format!("Illegal host name: '{}'", host)))
+        return Err(error::ErrorForbidden(format!(
+            "Illegal host name: '{}'",
+            host
+        )));
     }
 
     let uri = format!("http://{}/.well-known/acme-challenge/{}", host, token);
     info!("Forwarding challenge to '{}'.", uri);
 
     let mut proxied_response = match {
-            client.get(uri)
-                .timeout(c.timeout)
-                .header(header::USER_AGENT, "JoelLinn/acme-proxy")
-                .send()
-                .await
-        }
-        {
-            Ok(r) => r,
-            Err(e) => return Err(error::ErrorBadGateway(e)),
-        };
+        client
+            .get(uri)
+            .timeout(c.timeout)
+            .header(header::USER_AGENT, "JoelLinn/acme-proxy")
+            .send()
+            .await
+    } {
+        Ok(r) => r,
+        Err(e) => return Err(error::ErrorBadGateway(e)),
+    };
 
     match proxied_response.status() {
         StatusCode::NOT_FOUND => return Err(error::ErrorNotFound("Not found.")),
         StatusCode::OK => (),
-        s => return Err(error::ErrorBadGateway(format!("Server responded with status code {}.", s))),
+        s => {
+            return Err(error::ErrorBadGateway(format!(
+                "Server responded with status code {}.",
+                s
+            )))
+        }
     };
 
     let mut auth_key = match std::str::from_utf8(&proxied_response.body().await?) {
         Ok(s) => s,
         Err(e) => {
             warn!("Could not convert server response to utf8: {}", e);
-            return Err(error::ErrorBadGateway("Could not convert server response to utf8."))
+            return Err(error::ErrorBadGateway(
+                "Could not convert server response to utf8.",
+            ));
         }
-    }.trim().to_owned();
-    info!("Got auth key '{}' for token '{}' on host '{}'.", auth_key, token, host);
+    }
+    .trim()
+    .to_owned();
+    info!(
+        "Got auth key '{}' for token '{}' on host '{}'.",
+        auth_key, token, host
+    );
 
     // check if the authorization is valid
     let auth_len = auth_key.len() - (token.len() + 1);
-    if (auth_len < 43) || (auth_len > 100) ||
-        !auth_key.starts_with(token) ||
-        (auth_key.as_bytes()[token.len()] != b'.') ||
-        match auth_key.get((token.len() + 1)..) {
+    if (auth_len < 43)
+        || (auth_len > 100)
+        || !auth_key.starts_with(token)
+        || (auth_key.as_bytes()[token.len()] != b'.')
+        || match auth_key.get((token.len() + 1)..) {
             Some(s) => !c.re_valid_base64url.is_match(s),
             None => true,
-        } {
-        return Err(error::ErrorBadGateway("Server responded with invalid key authorization."))
+        }
+    {
+        return Err(error::ErrorBadGateway(
+            "Server responded with invalid key authorization.",
+        ));
     }
 
     auth_key.push('\n');
     Ok(HttpResponse::Ok()
         .set_header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .set_header(header::SERVER, "JoelLinn/acme-proxy")
-        .body(auth_key)
-    )
+        .body(auth_key))
 }
 
 #[actix_rt::main]
@@ -97,8 +124,9 @@ async fn main() -> std::io::Result<()> {
             Some(_) => &mut builder,
             None => builder
                 .filter_level(log::LevelFilter::Info)
-                .filter(Some("actix_web"), log::LevelFilter::Debug)
-        }.init();
+                .filter(Some("actix_web"), log::LevelFilter::Debug),
+        }
+        .init();
     }
 
     let matches = clap::App::new("ACME Proxy")
@@ -127,24 +155,28 @@ async fn main() -> std::io::Result<()> {
         let opt = matches.value_of("legal_hosts");
         let r = match opt {
             Some(s) => s,
-            None => return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Invalid legal_hosts value."))
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Invalid legal_hosts value.",
+                ))
+            }
         };
         match Regex::new(r) {
             Ok(r) => r,
-            Err(e) => return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e))
+            Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
         }
     };
     let conf_timeout = {
         let opt = matches.value_of("timeout");
         match opt.and_then(|t| t.parse::<u64>().ok()) {
             Some(t) => core::time::Duration::from_millis(t),
-            None=> return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Invalid timeout value '{}'.", opt.unwrap_or(""))))
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Invalid timeout value '{}'.", opt.unwrap_or("")),
+                ))
+            }
         }
     };
 
@@ -164,10 +196,9 @@ async fn main() -> std::io::Result<()> {
             .wrap(actix_web::middleware::Logger::default())
             .route(
                 "/.well-known/acme-challenge/{token:[A-Za-z0-9_-]{22,}}",
-                web::get().to(proxy))
-            .default_service(
-                web::route().to(|| HttpResponse::BadRequest()),
+                web::get().to(proxy),
             )
+            .default_service(web::route().to(|| HttpResponse::BadRequest()))
     })
     .workers(1)
     .bind("0.0.0.0:8080")?
