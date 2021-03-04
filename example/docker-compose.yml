@@ -4,7 +4,7 @@ services:
     image: joellinn/acme-proxy
     restart: always
     environment:
-      ACME_DOMAINS: '(\.i\.example\.com)$$'
+      ACME_LEGAL_HOSTS: '(\.i\.example\.com)$$'
     networks:
       - acme-proxy
   haproxy:

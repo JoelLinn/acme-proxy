@@ -7,6 +7,7 @@ use actix_web::{
     HttpServer, Result,
 };
 use regex::Regex;
+use std::env;
 
 struct ProxyConf {
     // static stuff initialized once:
@@ -116,6 +117,12 @@ async fn proxy(
         .body(auth_key))
 }
 
+fn env_or(k: &str, default: &str) -> String {
+    env::var_os(k)
+        .and_then(|v| v.into_string().ok())
+        .unwrap_or(default.to_string())
+}
+
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     {
@@ -129,6 +136,8 @@ async fn main() -> std::io::Result<()> {
         .init();
     }
 
+    let default_legal_hosts = env_or("ACME_LEGAL_HOSTS", "^.*$");
+    let default_timeout = env_or("ACME_TIMEOUT", "1000");
     let matches = clap::App::new("ACME Proxy")
         .version(clap::crate_version!())
         .arg(
@@ -136,7 +145,7 @@ async fn main() -> std::io::Result<()> {
                 .takes_value(true)
                 .long("legal_hosts")
                 .value_name("LEGAL_HOSTS")
-                .default_value("^.*$")
+                .default_value(&default_legal_hosts)
                 .help("Regex to filter proxied hosts.")
                 .required(false),
         )
@@ -145,27 +154,15 @@ async fn main() -> std::io::Result<()> {
                 .takes_value(true)
                 .long("timeout")
                 .value_name("TIMEOUT")
-                .default_value("1000")
+                .default_value(&default_timeout)
                 .help("Timeout for proxied request in milliseconds.")
                 .required(false),
         )
         .get_matches();
 
-    let conf_re_legal_hosts = {
-        let opt = matches.value_of("legal_hosts");
-        let r = match opt {
-            Some(s) => s,
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Invalid legal_hosts value.",
-                ))
-            }
-        };
-        match Regex::new(r) {
-            Ok(r) => r,
-            Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
-        }
+    let conf_re_legal_hosts = match Regex::new(matches.value_of("legal_hosts").unwrap()) {
+        Ok(r) => r,
+        Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
     };
     let conf_timeout = {
         let opt = matches.value_of("timeout");
