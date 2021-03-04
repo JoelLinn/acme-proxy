@@ -5,6 +5,7 @@ RUN apk add --no-cache musl-dev
 WORKDIR /usr/src/app
 
 ADD Cargo.toml .
+ADD Cargo.lock .
 ADD src src
 
 RUN rustc -V
