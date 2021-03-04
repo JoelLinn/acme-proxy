@@ -1,15 +1,21 @@
-FROM ekidd/rust-musl-builder:latest as bob
+FROM rust:alpine as bob
 
-ADD --chown=rust:rust Cargo.toml .
-ADD --chown=rust:rust src src
+RUN apk add --no-cache musl-dev
+
+WORKDIR /usr/src/app
+
+ADD Cargo.toml .
+ADD src src
 
 RUN rustc -V
-RUN cargo install --path .
+RUN rustup target add x86_64-unknown-linux-musl
+RUN cargo install --target x86_64-unknown-linux-musl --root . --path .
 
 
-FROM alpine:latest
+FROM scratch
 
-COPY --chown=root:root --from=bob /home/rust/.cargo/bin/acme-proxy /usr/local/bin/
+COPY --from=bob /usr/src/app/bin/acme-proxy /usr/local/bin/
+COPY --from=bob /etc/passwd /etc/
 
 EXPOSE 8080
 USER nobody
