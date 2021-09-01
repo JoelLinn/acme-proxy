@@ -17,7 +17,7 @@ The environment variable `ACME_LEGAL_HOSTS` holds a regex to filter incomming re
 `ACME_LEGAL_HOSTS` | matches
 ---- | -----
 `.*` | any string/domain (default)
-`^intra\.example\.com$` | exacty intra.example.com
+`^intra\.example\.com$` | exactly intra.example.com
 `(\.i\.example\.com)$\|(\.iana\.org)$` | any subdomain under i.example.com or any subdomain under iana.org
 
 Keep in mind that a regex like `iana\.org$` also matches a domain like `whateverisinfrontiana.org`, so better use something like `(\.|^)iana.org$` in that case.

@@ -3,9 +3,9 @@ extern crate log;
 
 use actix_http::http::header;
 use actix_web::{
-    client::Client, error, http::StatusCode, web, App, Error, HttpRequest, HttpResponse,
-    HttpServer, Result,
+    error, http::StatusCode, web, App, Error, HttpRequest, HttpResponse, HttpServer, Result,
 };
+use awc::Client;
 use regex::Regex;
 use std::env;
 
@@ -59,7 +59,7 @@ async fn proxy(
         client
             .get(uri)
             .timeout(c.timeout)
-            .header(header::USER_AGENT, "JoelLinn/acme-proxy")
+            .insert_header((header::USER_AGENT, "JoelLinn/acme-proxy"))
             .send()
             .await
     } {
@@ -112,8 +112,8 @@ async fn proxy(
 
     auth_key.push('\n');
     Ok(HttpResponse::Ok()
-        .set_header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-        .set_header(header::SERVER, "JoelLinn/acme-proxy")
+        .insert_header((header::CONTENT_TYPE, "text/plain; charset=utf-8"))
+        .insert_header((header::SERVER, "JoelLinn/acme-proxy"))
         .body(auth_key))
 }
 
@@ -188,7 +188,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .data(Client::new())
+            .app_data(web::Data::new(Client::new()))
             .app_data(proxy_conf.clone())
             .wrap(actix_web::middleware::Logger::default())
             .route(
