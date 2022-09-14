@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-use actix_http::http::header;
+use actix_http::header;
 use actix_web::{
     error, http::StatusCode, web, App, Error, HttpRequest, HttpResponse, HttpServer, Result,
 };
