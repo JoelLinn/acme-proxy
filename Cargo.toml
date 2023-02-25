@@ -1,6 +1,6 @@
 [package]
 name = "acme-proxy"
-version = "1.2.0"
+version = "1.2.1"
 authors = ["Joel Linn <jl@conductive.de>"]
 edition = '2018'
 
@@ -9,8 +9,8 @@ actix-rt = "2"
 actix-http = "3"
 actix-web = "4"
 awc = "3"
-clap = { version = "3", features = [ "cargo" ] }
-env_logger = "0.9"
+clap = { version = "4", features = [ "cargo", "string" ] }
+env_logger = "0.10"
 log = "0.4"
 regex = "1"
 

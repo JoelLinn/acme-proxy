@@ -29,4 +29,4 @@ ENV ACME_LEGAL_HOSTS .*
 # Timeout for internal request in ms
 ENV ACME_TIMEOUT 1000
 
-CMD ["acme-proxy"]
+ENTRYPOINT ["acme-proxy"]

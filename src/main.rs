@@ -138,11 +138,11 @@ async fn main() -> std::io::Result<()> {
 
     let default_legal_hosts = env_or("ACME_LEGAL_HOSTS", "^.*$");
     let default_timeout = env_or("ACME_TIMEOUT", "1000");
-    let matches = clap::App::new("ACME Proxy")
+    let matches = clap::Command::new("ACME Proxy")
         .version(clap::crate_version!())
         .arg(
-            clap::Arg::with_name("legal_hosts")
-                .takes_value(true)
+            clap::Arg::new("legal_hosts")
+                .num_args(1)
                 .long("legal_hosts")
                 .value_name("LEGAL_HOSTS")
                 .default_value(&default_legal_hosts)
@@ -150,8 +150,8 @@ async fn main() -> std::io::Result<()> {
                 .required(false),
         )
         .arg(
-            clap::Arg::with_name("timeout")
-                .takes_value(true)
+            clap::Arg::new("timeout")
+                .num_args(1)
                 .long("timeout")
                 .value_name("TIMEOUT")
                 .default_value(&default_timeout)
@@ -160,12 +160,13 @@ async fn main() -> std::io::Result<()> {
         )
         .get_matches();
 
-    let conf_re_legal_hosts = match Regex::new(matches.value_of("legal_hosts").unwrap()) {
-        Ok(r) => r,
-        Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
-    };
+    let conf_re_legal_hosts =
+        match Regex::new(matches.get_one::<String>("legal_hosts").unwrap().as_str()) {
+            Ok(r) => r,
+            Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+        };
     let conf_timeout = {
-        let opt = matches.value_of("timeout");
+        let opt = matches.get_one::<String>("timeout").map(|s| s.as_str());
         match opt.and_then(|t| t.parse::<u64>().ok()) {
             Some(t) => core::time::Duration::from_millis(t),
             None => {
